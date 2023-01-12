@@ -42,15 +42,10 @@ contract VaultToken is PoolToken {
         underlying = address(_lpToken);
         token0 = IUniswapV2Pair(underlying).token0();
         token1 = IUniswapV2Pair(underlying).token1();
-        if(token1 == WETH) {
-            token1 = token0;
-            token0 = WETH;
-        }
-        require(token0 == WETH);
         governance = _governance;
         pool = address(_pool);
+        token0.safeApprove(address(router), uint256(-1));
         token1.safeApprove(address(router), uint256(-1));
-        WETH.safeApprove(address(router), uint256(-1));
         underlying.safeApprove(address(_pool), uint256(-1));
     }
 
@@ -137,9 +132,9 @@ contract VaultToken is PoolToken {
         // (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).getReserves();
         // uint256 reserveA = WETH == token0 ? r0 : r1;
         uint256 swapAmount = reward.div(2);
-
-        router.swapExactTokensForTokensSimple(swapAmount, 0, WETH, token1, false, address(this), now);
-        router.addLiquidity(token0, token1, false,token0.myBalance(), token1.myBalance(), 0, 0, address(this), now);
+        address _token = token0 == WETH? token1 : token0;
+        router.swapExactTokensForTokensSimple(swapAmount, 0, WETH, _token, false, address(this), now);
+        router.addLiquidity(WETH, _token, false,WETH.myBalance(), _token.myBalance(), 0, 0, address(this), now);
         // 5. Stake the LP Tokens.
         ICantoLP(pool).mint(underlying.myBalance());
         emit Reinvest(msg.sender, reward, bounty);
