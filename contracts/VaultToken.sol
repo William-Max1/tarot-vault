@@ -18,7 +18,7 @@ contract VaultToken is PoolToken {
 
     IUniswapV2Router01 public router = IUniswapV2Router01(0xa252eEE9BDe830Ca4793F054B506587027825a8e);
     // IMasterChef public masterChef;
-    address public governance;
+    address governance;
     address constant public comptroller = 0x5E23dC409Fc2F832f83CEc191E245A191a4bCc5C;
     address public rewardsToken = 0x826551890Dc65655a0Aceca109aB11AbDbD7a07B;//reward token address;
     address public WETH = 0x826551890Dc65655a0Aceca109aB11AbDbD7a07B;
@@ -54,10 +54,6 @@ contract VaultToken is PoolToken {
         underlying.safeApprove(address(_pool), uint256(-1));
     }
 
-    function setGovernance(address _newgovernance) external {
-        require(msg.sender == governance, "not governance");
-        governance = _newgovernance;
-    }
     /*** PoolToken Overrides ***/
 
     function _update() internal {
@@ -176,13 +172,17 @@ contract VaultToken is PoolToken {
     }
 
     function reserve0CumulativeLast() external view returns (uint256) {
-        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).reserve0CumulativeLast();
+        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).currentCumulativePrices();
         return r0;
     }
 
     function reserve1CumulativeLast() external view returns (uint256) {
-        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).reserve1CumulativeLast();
+        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).currentCumulativePrices();
         return r1;
+    }
+
+    function currentCumulativePrices() external view returns (uint256 r0, uint256 r1, uint256 t) {
+        (r0, r1, t) = IUniswapV2Pair(underlying).currentCumulativePrices();
     }
 
 /*** Utilities ***/

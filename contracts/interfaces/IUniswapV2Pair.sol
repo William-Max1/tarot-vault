@@ -42,5 +42,6 @@ interface IUniswapV2Pair {
 
     function reserve0CumulativeLast() external view returns (uint256);
     function reserve1CumulativeLast() external view returns (uint256);
+    function currentCumulativePrices() external view returns (uint reserve0Cumulative, uint reserve1Cumulative, uint blockTimestamp);
 
 }
