@@ -8,19 +8,14 @@ interface IUniswapV2Router01 {
     function addLiquidity(
         address tokenA,
         address tokenB,
-        uint256 amountADesired,
-        uint256 amountBDesired,
-        uint256 amountAMin,
-        uint256 amountBMin,
+        bool stable,
+        uint amountADesired,
+        uint amountBDesired,
+        uint amountAMin,
+        uint amountBMin,
         address to,
-        uint256 deadline
-    )
-        external
-        returns (
-            uint256 amountA,
-            uint256 amountB,
-            uint256 liquidity
-        );
+        uint deadline
+    ) external  returns (uint amountA, uint amountB, uint liquidity) ;
 
     function addLiquidityETH(
         address token,
@@ -91,6 +86,16 @@ interface IUniswapV2Router01 {
         address to,
         uint256 deadline
     ) external returns (uint256[] memory amounts);
+
+    function swapExactTokensForTokensSimple(
+        uint amountIn,
+        uint amountOutMin,
+        address tokenFrom,
+        address tokenTo,
+        bool stable,
+        address to,
+        uint deadline
+    ) external   returns (uint[] memory amounts);
 
     function swapTokensForExactTokens(
         uint256 amountOut,

@@ -8,53 +8,60 @@ import "./interfaces/IUniswapV2Router01.sol";
 import "./interfaces/IUniswapV2Pair.sol";
 import "./libraries/SafeToken.sol";
 import "./libraries/Math.sol";
+import "./interfaces/ICantoLP.sol";
+import "./interfaces/IComptroller.sol";
 
-contract VaultToken is IVaultToken, IUniswapV2Pair, PoolToken {
+contract VaultToken is PoolToken {
     using SafeToken for address;
 
     bool public constant isVaultToken = true;
 
-    IUniswapV2Router01 public router;
-    IMasterChef public masterChef;
-    address public rewardsToken;
-    address public WETH;
+    IUniswapV2Router01 public router = IUniswapV2Router01(0xa252eEE9BDe830Ca4793F054B506587027825a8e);
+    // IMasterChef public masterChef;
+    address public governance;
+    address constant public comptroller = 0x5E23dC409Fc2F832f83CEc191E245A191a4bCc5C;
+    address public rewardsToken = 0x826551890Dc65655a0Aceca109aB11AbDbD7a07B;//reward token address;
+    address public WETH = 0x826551890Dc65655a0Aceca109aB11AbDbD7a07B;
+    address public pool;
     address public token0;
     address public token1;
-    uint256 public swapFeeFactor;
-    uint256 public pid;
-    uint256 public constant REINVEST_BOUNTY = 0.01e18;
+
+    // uint256 public pid;
+    uint256 public constant REINVEST_BOUNTY = 0.10e18;
 
     event Reinvest(address indexed caller, uint256 reward, uint256 bounty);
 
     function _initialize(
-        IUniswapV2Router01 _router,
-        IMasterChef _masterChef,
-        address _rewardsToken,
-        uint256 _swapFeeFactor,
-        uint256 _pid
+        address _lpToken,
+        address _pool,
+        address _governance
     ) external {
         require(factory == address(0), "VaultToken: FACTORY_ALREADY_SET"); // sufficient check
         factory = msg.sender;
-        _setName("Tarot Vault Token", "vTAROT");
-        WETH = _router.WETH();
-        router = _router;
-        masterChef = _masterChef;
-        swapFeeFactor = _swapFeeFactor;
-        pid = _pid;
-        (IERC20 _underlying, , , ) = masterChef.poolInfo(_pid);
-        underlying = address(_underlying);
+        _setName("Leverage Vault Token - ", "vTAROT");
+        underlying = address(_lpToken);
         token0 = IUniswapV2Pair(underlying).token0();
         token1 = IUniswapV2Pair(underlying).token1();
-        rewardsToken = _rewardsToken;
-        rewardsToken.safeApprove(address(router), uint256(-1));
+        if(token1 == WETH) {
+            token1 = token0;
+            token0 = WETH;
+        }
+        require(token0 == WETH);
+        governance = _governance;
+        pool = address(_pool);
+        token1.safeApprove(address(router), uint256(-1));
         WETH.safeApprove(address(router), uint256(-1));
-        underlying.safeApprove(address(masterChef), uint256(-1));
+        underlying.safeApprove(address(_pool), uint256(-1));
     }
 
+    function setGovernance(address _newgovernance) external {
+        require(msg.sender == governance, "not governance");
+        governance = _newgovernance;
+    }
     /*** PoolToken Overrides ***/
 
     function _update() internal {
-        (uint256 _totalBalance, ) = masterChef.userInfo(pid, address(this));
+        uint256 _totalBalance = ICantoLP(pool).balanceOf(address(this));
         totalBalance = _totalBalance;
         emit Sync(totalBalance);
     }
@@ -68,17 +75,11 @@ contract VaultToken is IVaultToken, IUniswapV2Pair, PoolToken {
     {
         uint256 mintAmount = underlying.myBalance();
         // handle pools with deposit fees by checking balance before and after deposit
-        (uint256 _totalBalanceBefore, ) = masterChef.userInfo(
-            pid,
-            address(this)
-        );
-        masterChef.deposit(pid, mintAmount);
-        (uint256 _totalBalanceAfter, ) = masterChef.userInfo(
-            pid,
-            address(this)
-        );
+        uint256 _before = ICantoLP(pool).balanceOf(address(this));
+        ICantoLP(pool).mint(mintAmount);
+        uint256 _after = ICantoLP(pool).balanceOf(address(this));
 
-        mintTokens = _totalBalanceAfter.sub(_totalBalanceBefore).mul(1e18).div(
+        mintTokens = _after.sub(_before).mul(1e18).div(
             exchangeRate()
         );
 
@@ -105,26 +106,12 @@ contract VaultToken is IVaultToken, IUniswapV2Pair, PoolToken {
         require(redeemAmount > 0, "VaultToken: REDEEM_AMOUNT_ZERO");
         require(redeemAmount <= totalBalance, "VaultToken: INSUFFICIENT_CASH");
         _burn(address(this), redeemTokens);
-        masterChef.withdraw(pid, redeemAmount);
+        ICantoLP(pool).redeemUnderlying(redeemAmount);
         _safeTransfer(redeemer, redeemAmount);
         emit Redeem(msg.sender, redeemer, redeemAmount, redeemTokens);
     }
 
-    /*** Reinvest ***/
-
-    function _optimalDepositA(
-        uint256 _amountA,
-        uint256 _reserveA,
-        uint256 _swapFeeFactor
-    ) internal pure returns (uint256) {
-        uint256 a = uint256(1000).add(_swapFeeFactor).mul(_reserveA);
-        uint256 b = _amountA.mul(1000).mul(_reserveA).mul(4).mul(
-            _swapFeeFactor
-        );
-        uint256 c = Math.sqrt(a.mul(a).add(b));
-        uint256 d = uint256(2).mul(_swapFeeFactor);
-        return c.sub(a).div(d);
-    }
+/*** Reinvest ***/
 
     function approveRouter(address token, uint256 amount) internal {
         if (IERC20(token).allowance(address(this), address(router)) >= amount)
@@ -132,88 +119,37 @@ contract VaultToken is IVaultToken, IUniswapV2Pair, PoolToken {
         token.safeApprove(address(router), uint256(-1));
     }
 
-    function swapExactTokensForTokens(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) internal {
-        address[] memory path = new address[](2);
-        path[0] = address(tokenIn);
-        path[1] = address(tokenOut);
-        approveRouter(tokenIn, amount);
-        router.swapExactTokensForTokens(amount, 0, path, address(this), now);
-    }
-
-    function addLiquidity(
-        address tokenA,
-        address tokenB,
-        uint256 amountA,
-        uint256 amountB
-    ) internal returns (uint256 liquidity) {
-        approveRouter(tokenA, amountA);
-        approveRouter(tokenB, amountB);
-        (, , liquidity) = router.addLiquidity(
-            tokenA,
-            tokenB,
-            amountA,
-            amountB,
-            0,
-            0,
-            address(this),
-            now
-        );
-    }
 
     function reinvest() external nonReentrant update {
         require(msg.sender == tx.origin);
-        // 1. Withdraw all the rewards.
-        masterChef.withdraw(pid, 0);
+        // 1. claim all the rewards.
+        // masterChef.withdraw(pid, 0);
+        IComptroller(comptroller).claimComp(address(this));
         uint256 reward = rewardsToken.myBalance();
         if (reward == 0) return;
+
         // 2. Send the reward bounty to the caller.
         uint256 bounty = reward.mul(REINVEST_BOUNTY) / 1e18;
-        rewardsToken.safeTransfer(msg.sender, bounty);
+        rewardsToken.safeTransfer(governance, bounty);
+
         // 3. Convert all the remaining rewards to token0 or token1.
-        address tokenA;
-        address tokenB;
-        if (token0 == rewardsToken || token1 == rewardsToken) {
-            (tokenA, tokenB) = token0 == rewardsToken
-                ? (token0, token1)
-                : (token1, token0);
-        } else {
-            swapExactTokensForTokens(rewardsToken, WETH, reward.sub(bounty));
-            if (token0 == WETH || token1 == WETH) {
-                (tokenA, tokenB) = token0 == WETH
-                    ? (token0, token1)
-                    : (token1, token0);
-            } else {
-                swapExactTokensForTokens(WETH, token0, WETH.myBalance());
-                (tokenA, tokenB) = (token0, token1);
-            }
-        }
+        // @dev: this part is unneccesary because rewards token is wcanto
+
         // 4. Convert tokenA to LP Token underlyings.
-        uint256 totalAmountA = tokenA.myBalance();
+        uint256 totalAmountA = WETH.myBalance();
         assert(totalAmountA > 0);
-        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).getReserves();
-        uint256 reserveA = tokenA == token0 ? r0 : r1;
-        uint256 swapAmount = _optimalDepositA(
-            totalAmountA,
-            reserveA,
-            swapFeeFactor
-        );
-        swapExactTokensForTokens(tokenA, tokenB, swapAmount);
-        uint256 liquidity = addLiquidity(
-            tokenA,
-            tokenB,
-            totalAmountA.sub(swapAmount),
-            tokenB.myBalance()
-        );
+        // (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).getReserves();
+        // uint256 reserveA = WETH == token0 ? r0 : r1;
+        uint256 swapAmount = reward.div(2);
+
+        router.swapExactTokensForTokensSimple(swapAmount, 0, WETH, token1, false, address(this), now);
+        router.addLiquidity(token0, token1, false,token0.myBalance(), token1.myBalance(), 0, 0, address(this), now);
         // 5. Stake the LP Tokens.
-        masterChef.deposit(pid, liquidity);
+        ICantoLP(pool).mint(underlying.myBalance());
         emit Reinvest(msg.sender, reward, bounty);
     }
 
-    /*** Mirrored From uniswapV2Pair ***/
+/*** Mirrored From uniswapV2Pair ***/
 
     function getReserves()
         external
@@ -239,18 +175,30 @@ contract VaultToken is IVaultToken, IUniswapV2Pair, PoolToken {
         );
     }
 
-    function price0CumulativeLast() external view returns (uint256) {
-        return IUniswapV2Pair(underlying).price0CumulativeLast();
+    function reserve0CumulativeLast() external view returns (uint256) {
+        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).reserve0CumulativeLast();
+        return r0;
     }
 
-    function price1CumulativeLast() external view returns (uint256) {
-        return IUniswapV2Pair(underlying).price1CumulativeLast();
+    function reserve1CumulativeLast() external view returns (uint256) {
+        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).reserve1CumulativeLast();
+        return r1;
     }
 
-    /*** Utilities ***/
+/*** Utilities ***/
 
     function safe112(uint256 n) internal pure returns (uint112) {
         require(n < 2**112, "VaultToken: SAFE112");
         return uint112(n);
+    }
+
+    function inCaseTokensGetStuck(address _token) external {
+        // can only be called by governance
+        require(msg.sender == governance);
+        require(_token != address(underlying), "!token");
+        require(_token != address(pool), "!token");
+
+        uint256 amount = _token.myBalance();
+        _token.safeTransfer(governance, amount);
     }
 }

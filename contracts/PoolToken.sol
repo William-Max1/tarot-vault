@@ -11,7 +11,7 @@ contract PoolToken is IPoolToken, TarotERC20 {
     address public factory;
     uint256 public totalBalance;
     uint256 public constant MINIMUM_LIQUIDITY = 1000;
-
+/*** events ***/
     event Mint(
         address indexed sender,
         address indexed minter,
@@ -26,21 +26,26 @@ contract PoolToken is IPoolToken, TarotERC20 {
     );
     event Sync(uint256 totalBalance);
 
-    /*** Initialize ***/
-
+/*** Initialize ***/
     // called once by the factory
     function _setFactory() external {
         require(factory == address(0), "Tarot: FACTORY_ALREADY_SET");
         factory = msg.sender;
     }
 
-    /*** PoolToken ***/
+/*** PoolToken ***/
 
     function _update() internal {
         totalBalance = IERC20(underlying).balanceOf(address(this));
         emit Sync(totalBalance);
     }
 
+    // update totalBalance with current balance
+    modifier update() {
+        _;
+        _update();
+    }
+    
     function exchangeRate() public view returns (uint256) {
         uint256 _totalSupply = totalSupply; // gas savings
         uint256 _totalBalance = totalBalance; // gas savings
@@ -122,9 +127,5 @@ contract PoolToken is IPoolToken, TarotERC20 {
         _notEntered = true;
     }
 
-    // update totalBalance with current balance
-    modifier update() {
-        _;
-        _update();
-    }
+
 }
