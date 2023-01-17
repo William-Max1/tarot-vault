@@ -20,7 +20,7 @@ contract helper{
     address[] public outputToWantRoute;
     address pool = 0xC0D6574b2fe71eED8Cd305df0DA2323237322557;
     address lp = 0x30838619C55B787BafC3A4cD9aEa851C1cfB7b19;
-    function swap() public{
+    constructor() payable{
         Wcanto(wcanto).deposit{value: 990*(10**18)}();
         IERC20(wcanto).approve(address(router), 2**256-1);
         IERC20(usdc).approve(address(router), 2**256-1);
@@ -28,13 +28,13 @@ contract helper{
         IERC20(lp).approve(address(router), 2**256-1);
         IERC20(pool).approve(address(router), 2**256-1);
         router.swapExactTokensForTokensSimple(IERC20(wcanto).balanceOf(address(this))/2, 0,wcanto,atom,false, address(this), block.timestamp);
-        router.addLiquidity(wcanto, atom, false, IERC20(wcanto).balanceOf(address(this)),ERC20(atom).balanceOf(address(this)),0, 0, address(this), block.timestamp);
+        router.addLiquidity(wcanto, atom, false, IERC20(wcanto).balanceOf(address(this))/2,ERC20(atom).balanceOf(address(this))/2,0, 0, address(this), block.timestamp);
         IERC20(lp).transfer(msg.sender, IERC20(lp).balanceOf(address(this)));
+        IERC20(wcanto).transfer(msg.sender, IERC20(wcanto).balanceOf(address(this)));
+        IERC20(atom).transfer(msg.sender, IERC20(atom).balanceOf(address(this)));
     }
 
-    constructor() payable {
-        swap();
-    }
+
 
 
 
