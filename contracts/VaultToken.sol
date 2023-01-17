@@ -10,14 +10,17 @@ import "./libraries/SafeToken.sol";
 import "./libraries/Math.sol";
 import "./interfaces/ICantoLP.sol";
 import "./interfaces/IComptroller.sol";
-
+/**
+ * @dev This file implements the leverage auto-harvest vault token
+ * As most part of this is forked from Tarot-protocol, the version of solidity is 0.5.16
+ */
 contract VaultToken is PoolToken {
     using SafeToken for address;
 
     bool public constant isVaultToken = true;
 
     IUniswapV2Router01 public router = IUniswapV2Router01(0xa252eEE9BDe830Ca4793F054B506587027825a8e);
-    // IMasterChef public masterChef;
+
     address governance;
     address constant public comptroller = 0x5E23dC409Fc2F832f83CEc191E245A191a4bCc5C;
     address public rewardsToken = 0x826551890Dc65655a0Aceca109aB11AbDbD7a07B;//reward token address;
@@ -27,18 +30,20 @@ contract VaultToken is PoolToken {
     address public token1;
 
     // uint256 public pid;
-    uint256 public constant REINVEST_BOUNTY = 0.10e18;
+    uint256 public REINVEST_BOUNTY = 0.005e18;
+    uint256 public GOVERNANCE_FEE = 0.05e18;
 
     event Reinvest(address indexed caller, uint256 reward, uint256 bounty);
 
     function _initialize(
+        string calldata name,
         address _lpToken,
         address _pool,
         address _governance
     ) external {
         require(factory == address(0), "VaultToken: FACTORY_ALREADY_SET"); // sufficient check
         factory = msg.sender;
-        _setName("Leverage Vault Token - ", "vTAROT");
+        _setName(name, "vLEV-LP");
         underlying = address(_lpToken);
         token0 = IUniswapV2Pair(underlying).token0();
         token1 = IUniswapV2Pair(underlying).token1();
@@ -74,11 +79,6 @@ contract VaultToken is PoolToken {
             exchangeRate()
         );
 
-        if (totalSupply == 0) {
-            // permanently lock the first MINIMUM_LIQUIDITY tokens
-            mintTokens = mintTokens.sub(MINIMUM_LIQUIDITY);
-            _mint(address(0), MINIMUM_LIQUIDITY);
-        }
         require(mintTokens > 0, "VaultToken: MINT_AMOUNT_ZERO");
         _mint(minter, mintTokens);
         emit Mint(msg.sender, minter, mintAmount, mintTokens);
@@ -120,24 +120,24 @@ contract VaultToken is PoolToken {
         if (reward == 0) return;
 
         // 2. Send the reward bounty to the caller.
-        uint256 bounty = reward.mul(REINVEST_BOUNTY) / 1e18;
-        rewardsToken.safeTransfer(governance, bounty);
+        uint256 bounty1 = reward.mul(GOVERNANCE_FEE) / 1e18;
+        rewardsToken.safeTransfer(governance, bounty1);
+        uint256 bounty2 = reward.mul(REINVEST_BOUNTY) / 1e18;
+        rewardsToken.safeTransfer(msg.sender, bounty2);
 
         // 3. Convert all the remaining rewards to token0 or token1.
         // @dev: this part is unneccesary because rewards token is wcanto
 
         // 4. Convert tokenA to LP Token underlyings.
         uint256 totalAmountA = WETH.myBalance();
-        assert(totalAmountA > 0);
-        // (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).getReserves();
-        // uint256 reserveA = WETH == token0 ? r0 : r1;
+        require(totalAmountA > 0, "Not enough rewards");
         uint256 swapAmount = reward.div(2);
         address _token = token0 == WETH? token1 : token0;
         router.swapExactTokensForTokensSimple(swapAmount, 0, WETH, _token, false, address(this), now);
         router.addLiquidity(WETH, _token, false,WETH.myBalance(), _token.myBalance(), 0, 0, address(this), now);
         // 5. Stake the LP Tokens.
         ICantoLP(pool).mint(underlying.myBalance());
-        emit Reinvest(msg.sender, reward, bounty);
+        emit Reinvest(msg.sender, reward, bounty1 + bounty2);
     }
 
 /*** Mirrored From uniswapV2Pair ***/
@@ -167,12 +167,12 @@ contract VaultToken is PoolToken {
     }
 
     function reserve0CumulativeLast() external view returns (uint256) {
-        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).currentCumulativePrices();
+        (uint256 r0, , ) = IUniswapV2Pair(underlying).currentCumulativePrices();
         return r0;
     }
 
     function reserve1CumulativeLast() external view returns (uint256) {
-        (uint256 r0, uint256 r1, ) = IUniswapV2Pair(underlying).currentCumulativePrices();
+        (, uint256 r1, ) = IUniswapV2Pair(underlying).currentCumulativePrices();
         return r1;
     }
 
